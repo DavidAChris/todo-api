@@ -4,14 +4,13 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 )
 
-var taskDbLock = sync.RWMutex{}
-
 type Task struct {
-	Id int `json:"id"`
+	Id uint64 `json:"id"`
 	TaskRequest
 }
 
@@ -20,8 +19,16 @@ type TaskRequest struct {
 	Completed   bool   `json:"completed"`
 }
 
-var tasksDb = make(map[int]Task)
-var taskIdCount = 0
+var (
+	taskDbLock  = sync.RWMutex{}
+	tasksDb     = make(map[uint64]Task)
+	taskIdCount atomic.Uint64
+)
+
+const (
+	TaskNotExistError = "Task does not exist."
+	IdParamError      = "Incorrect id format."
+)
 
 func setupRouter() *gin.Engine {
 	router := gin.Default()
@@ -35,7 +42,7 @@ func setupRouter() *gin.Engine {
 
 func main() {
 	router := setupRouter()
-	router.Run("localhost:8080")
+	router.Run(":8080")
 }
 
 func ping(ctx *gin.Context) {
@@ -55,10 +62,8 @@ func getAllTasks(ctx *gin.Context) {
 
 // Create a task
 func postCreateTask(ctx *gin.Context) {
-	taskDbLock.Lock()
-	newTaskId := taskIdCount
-	taskIdCount += 1
-	taskDbLock.Unlock()
+	newTaskId := taskIdCount.Load()
+	taskIdCount.Add(1)
 	var newTask Task
 	if err := ctx.BindJSON(&newTask); err != nil {
 		return
@@ -72,8 +77,9 @@ func postCreateTask(ctx *gin.Context) {
 
 // Update a Task
 func putUpdateTask(ctx *gin.Context) {
-	id, err := strconv.Atoi(ctx.Param("id"))
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
 	if err != nil {
+		ctx.String(http.StatusBadRequest, IdParamError)
 		return
 	}
 	var updateTask TaskRequest
@@ -84,7 +90,7 @@ func putUpdateTask(ctx *gin.Context) {
 	val, ok := tasksDb[id]
 	taskDbLock.RUnlock()
 	if !ok {
-		ctx.JSON(http.StatusNotFound, gin.H{"err": "task not found"})
+		ctx.String(http.StatusNotFound, TaskNotExistError)
 		return
 	}
 	if val.Description != updateTask.Description {
@@ -101,12 +107,13 @@ func putUpdateTask(ctx *gin.Context) {
 
 // Delete a Task
 func deleteTask(ctx *gin.Context) {
-	id, err := strconv.Atoi(ctx.Param("id"))
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
 	if err != nil {
+		ctx.String(http.StatusBadRequest, IdParamError)
 		return
 	}
 	if _, ok := tasksDb[id]; !ok {
-		ctx.JSON(http.StatusNotFound, gin.H{"err": "task does not exist"})
+		ctx.String(http.StatusNotFound, TaskNotExistError)
 		return
 	}
 	taskDbLock.Lock()
