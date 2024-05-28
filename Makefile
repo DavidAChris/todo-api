@@ -1,5 +1,5 @@
 build:
-	env GOOS=linux go build -ldflags="-s -w" -o bin/bootstrap main.go; zip -j bootstrap.zip ./bin/bootstrap
+	env GOOS=linux env GOARCH=amd64 go build -ldflags="-s -w" -o bin/bootstrap main.go; zip -j bootstrap.zip ./bin/bootstrap
 
 run: build
 	@./bin/todo-api
