@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"davidc/todo-api/models"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -25,9 +26,9 @@ func TestPingRoute(t *testing.T) {
 }
 
 func TestCreateTask(t *testing.T) {
-	newTask := TaskRequest{
+	newTask := models.TaskRequest{
 		Description: "Hello",
-		Completed:   false,
+		Completed:   0,
 	}
 	newTaskJson, _ := json.Marshal(newTask)
 	router, w := routerAndHttpTest()

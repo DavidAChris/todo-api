@@ -1,27 +1,22 @@
 package main
 
 import (
+	"davidc/todo-api/database"
+	"davidc/todo-api/models"
+	"davidc/todo-api/query"
+	"davidc/todo-api/services"
+	"github.com/gin-gonic/gin"
+	_ "github.com/glebarez/go-sqlite"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
 	"sync/atomic"
-
-	"github.com/gin-gonic/gin"
 )
-
-type Task struct {
-	Id uint64 `json:"id"`
-	TaskRequest
-}
-
-type TaskRequest struct {
-	Description string `json:"task"`
-	Completed   bool   `json:"completed"`
-}
 
 var (
 	taskDbLock  = sync.RWMutex{}
-	tasksDb     = make(map[uint64]Task)
+	tasksDb     = make(map[uint64]models.Task)
 	taskIdCount atomic.Uint64
 )
 
@@ -40,7 +35,17 @@ func setupRouter() *gin.Engine {
 	return router
 }
 
+func setupAws() {
+	s3Svc, details := services.ConfigAws()
+	log.Println("About to Init DB")
+	err := database.InitDb(s3Svc, details)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
 func main() {
+	setupAws()
 	router := setupRouter()
 	router.Run(":8080")
 }
@@ -51,28 +56,28 @@ func ping(ctx *gin.Context) {
 
 // Get all Tasks
 func getAllTasks(ctx *gin.Context) {
-	allTasks := make([]Task, 0, len(tasksDb))
-	taskDbLock.RLock()
-	for _, v := range tasksDb {
-		allTasks = append(allTasks, v)
+	allTasks, err := query.SelectAllTodos()
+	if err != nil {
+		ctx.IndentedJSON(http.StatusInternalServerError, map[string]string{"err": "Internal Server Error"})
+		return
 	}
-	taskDbLock.RUnlock()
+	log.Println(allTasks)
 	ctx.IndentedJSON(http.StatusOK, allTasks)
 }
 
 // Create a task
 func postCreateTask(ctx *gin.Context) {
-	newTaskId := taskIdCount.Load()
-	taskIdCount.Add(1)
-	var newTask Task
+	var newTask models.TaskRequest
 	if err := ctx.BindJSON(&newTask); err != nil {
+		ctx.IndentedJSON(http.StatusInternalServerError, map[string]string{"err": "Internal Server Error"})
 		return
 	}
-	newTask.Id = newTaskId
-	taskDbLock.Lock()
-	tasksDb[newTaskId] = newTask
-	taskDbLock.Unlock()
-	ctx.IndentedJSON(http.StatusCreated, newTask)
+	err := query.CreateTask(newTask)
+	if err != nil {
+		ctx.IndentedJSON(http.StatusInternalServerError, map[string]string{"err": "Internal Server Error"})
+		return
+	}
+	ctx.Status(http.StatusCreated)
 }
 
 // Update a Task
@@ -82,7 +87,7 @@ func putUpdateTask(ctx *gin.Context) {
 		ctx.String(http.StatusBadRequest, IdParamError)
 		return
 	}
-	var updateTask TaskRequest
+	var updateTask models.TaskRequest
 	if err := ctx.BindJSON(&updateTask); err != nil {
 		return
 	}
